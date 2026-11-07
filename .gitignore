@@ -42,3 +42,4 @@ supabase/.branches
 # Local agent tooling, not application source
 .agents/
 .aider-desk/
+.vercel
