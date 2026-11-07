@@ -41,6 +41,22 @@ export type InterestRoundingPolicy = "round_up_partial_month" | "round_down_part
 export type AuditAction = "INSERT" | "UPDATE" | "DELETE";
 export type ClosureType = "REDEEMED" | "CANCELLED";
 
+/** `calculate_live_settlement` read model. Money arrives as a numeric string
+ * over PostgREST, exactly like the transaction columns it is derived from. */
+export interface LiveSettlementJson {
+  transaction_id: string;
+  calculation_date: string;
+  original_principal: string;
+  previous_principal_repayments: string;
+  remaining_principal: string;
+  total_interest_accrued: string;
+  previous_interest_paid: string;
+  outstanding_interest: string;
+  total_previous_payments: string;
+  amount_payable_today: string;
+  redeemed: boolean;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -185,6 +201,7 @@ export interface Database {
           outstanding_principal: string;
           interest_settled_through: string;
           issue_date: string;
+          is_historical: boolean;
           tenure_months: number;
           due_date: string;
           status: TransactionStatus;
@@ -218,6 +235,7 @@ export interface Database {
           outstanding_principal: number;
           interest_settled_through: string;
           issue_date: string;
+          is_historical?: boolean;
           tenure_months: number;
           due_date: string;
           status?: TransactionStatus;
@@ -264,6 +282,7 @@ export interface Database {
           jewellery_name: string | null;
           metal_type: string;
           quantity: number;
+          photo_path: string | null;
           created_at: string;
         };
         // Written only via create_transaction() — see transactions above.
@@ -283,6 +302,7 @@ export interface Database {
           jewellery_name?: string | null;
           metal_type?: string;
           quantity?: number;
+          photo_path?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["jewellery_items"]["Insert"]>;
@@ -539,6 +559,20 @@ export interface Database {
       create_jewellery_loan: {
         Args: { p_customer_id: string; p_principal_amount: number; p_interest_type: "MONTHLY" | "YEARLY" | "FLAT"; p_interest_rate: number; p_flat_interest_basis: number | null; p_deposit_date: string; p_notes: string | null; p_idempotency_key: string; p_items: Array<{ jewellery_name: string; metal_type: string; weight_grams: number; quantity: number; notes?: string | null }> };
         Returns: Database["public"]["Tables"]["transactions"]["Row"];
+      };
+      create_historical_jewellery_loan: {
+        Args: Database["public"]["Functions"]["create_jewellery_loan"]["Args"] & {
+          p_previous_payments: Array<{ payment_date: string; amount: number; payment_method: "CASH" | "UPI" | "BANK_TRANSFER" | "OTHER"; remarks?: string | null; reference_number?: string | null; idempotency_key: string }>;
+        };
+        Returns: Database["public"]["Tables"]["transactions"]["Row"];
+      };
+      calculate_live_settlement: {
+        Args: { p_transaction_id: string; p_as_of?: string };
+        Returns: LiveSettlementJson;
+      };
+      set_jewellery_item_photo: {
+        Args: { p_item_id: string; p_photo_path: string };
+        Returns: Database["public"]["Tables"]["jewellery_items"]["Row"];
       };
     };
 

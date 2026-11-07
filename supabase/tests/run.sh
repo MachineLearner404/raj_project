@@ -31,11 +31,14 @@ for f in "$MIGRATIONS_DIR"/*.sql; do
   psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$f" > /dev/null
 done
 
-echo "==> Running RLS/constraint and auth/onboarding/permission tests"
-# These deliberately share one psql session: Phase 3 tests reuse the temporary
-# fixture table created by the baseline RLS suite.
+echo "==> Running RLS/constraint, auth/onboarding/permission, historical settlement and jewellery photo tests"
+# These deliberately share one psql session: Phase 3 tests, the historical
+# settlement suite and the jewellery photo suite all reuse the temporary
+# fixture table created by the baseline RLS suite, so the order below matters.
 psql -d "$DB_NAME" -v ON_ERROR_STOP=1 \
   -f "$SCRIPT_DIR/rls_and_constraints.test.sql" \
-  -f "$SCRIPT_DIR/auth_and_permissions.test.sql"
+  -f "$SCRIPT_DIR/auth_and_permissions.test.sql" \
+  -f "$SCRIPT_DIR/historical_settlement.test.sql" \
+  -f "$SCRIPT_DIR/jewellery_item_photos.test.sql"
 
 echo "==> All tests passed."

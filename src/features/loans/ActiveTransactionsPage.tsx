@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { DataTable, type DataTableColumn } from "@/components/shared/DataTable";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { DisabledAction } from "@/components/shared/DisabledAction";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -14,58 +13,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { demoLoans } from "@/data/demo-data";
-import type { JewelleryLoan, LoanStatus } from "@/types/domain";
+import { listActiveTransactions, type TransactionWithRelations } from "@/lib/repositories/transactions.repository";
 
-const columns: DataTableColumn<JewelleryLoan>[] = [
-  { key: "loanNumber", header: "Loan #", render: (l) => l.loanNumber },
-  { key: "customerName", header: "Customer", render: (l) => l.customerName },
-  {
-    key: "principalAmount",
-    header: "Principal",
-    render: (l) => `₹${l.principalAmount.toLocaleString("en-IN")}`,
-  },
-  {
-    key: "interestAccrued",
-    header: "Interest accrued",
-    render: (l) => `₹${l.interestAccrued.toLocaleString("en-IN")}`,
-  },
-  { key: "dueDate", header: "Due date", render: (l) => l.dueDate },
+const money = (v: string | number) => `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+const isOverdue = (t: TransactionWithRelations) => t.due_date < new Date().toISOString().slice(0, 10);
+
+const columns: DataTableColumn<TransactionWithRelations>[] = [
+  { key: "pledge_code", header: "Pledge #", render: (t) => t.pledge_code },
+  { key: "customer", header: "Customer", render: (t) => `${t.customers?.full_name} · ${t.customers?.mobile}` },
+  { key: "principal_amount", header: "Principal", render: (t) => money(t.principal_amount) },
+  { key: "accrued_interest", header: "Interest accrued", render: (t) => money(t.accrued_interest) },
+  { key: "due_date", header: "Due date", render: (t) => t.due_date },
   {
     key: "status",
     header: "Status",
-    render: (l) => <StatusBadge status={l.status} />,
+    render: (t) =>
+      isOverdue(t) ? (
+        <Badge variant="outline" className="border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400">Overdue</Badge>
+      ) : (
+        <Badge variant="outline" className="border-transparent bg-secondary text-secondary-foreground">
+          {t.status === "PARTIALLY_PAID" ? "Partially paid" : "Active"}
+        </Badge>
+      ),
   },
 ];
 
-type StatusFilter = "all" | LoanStatus;
+type StatusFilter = "all" | "ACTIVE" | "PARTIALLY_PAID" | "OVERDUE";
 
 export function ActiveTransactionsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [rows, setRows] = useState<TransactionWithRelations[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const openLoans = useMemo(
-    () => demoLoans.filter((l) => l.status === "active" || l.status === "overdue"),
-    [],
-  );
+  useEffect(() => {
+    void listActiveTransactions()
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return openLoans.filter((loan) => {
-      const matchesStatus = statusFilter === "all" || loan.status === statusFilter;
+    return rows.filter((t) => {
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "OVERDUE" ? isOverdue(t) : t.status === statusFilter);
       const matchesQuery =
         !q ||
-        loan.loanNumber.toLowerCase().includes(q) ||
-        loan.customerName.toLowerCase().includes(q);
+        t.pledge_code.toLowerCase().includes(q) ||
+        t.customers?.full_name?.toLowerCase().includes(q) ||
+        t.customers?.mobile?.includes(q);
       return matchesStatus && matchesQuery;
     });
-  }, [openLoans, query, statusFilter]);
+  }, [rows, query, statusFilter]);
 
   return (
     <div>
       <PageHeader
         title="Active Transactions"
-        description="Loans currently open — active and overdue."
+        description="Pledges currently open — active and partially paid."
         actions={
           <Button asChild>
             <Link to="/loans/new">New Jewellery Loan</Link>
@@ -78,7 +85,7 @@ export function ActiveTransactionsPage() {
           <SearchBar
             value={query}
             onChange={setQuery}
-            placeholder="Search by loan # or customer…"
+            placeholder="Search by pledge #, customer, or mobile…"
           />
         </div>
         <Select
@@ -90,8 +97,9 @@ export function ActiveTransactionsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="overdue">Overdue</SelectItem>
+            <SelectItem value="ACTIVE">Active</SelectItem>
+            <SelectItem value="PARTIALLY_PAID">Partially paid</SelectItem>
+            <SelectItem value="OVERDUE">Overdue</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -99,26 +107,25 @@ export function ActiveTransactionsPage() {
       <DataTable
         columns={columns}
         rows={filtered}
-        getRowId={(l) => l.id}
-        actions={(loan) => (
+        isLoading={loading}
+        getRowId={(t) => t.id}
+        actions={(t) => (
           <>
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/payments/new?loanId=${loan.id}`}>Receive Payment</Link>
+              <Link to={`/payments/new?loanId=${t.id}`}>Receive Payment</Link>
             </Button>
-            <DisabledAction
-              label="View"
-              reason="Loan detail / ledger view ships in Phase 2"
-              size="sm"
-            />
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/transactions/${t.id}`}>View</Link>
+            </Button>
           </>
         )}
         emptyState={
           <EmptyState
-            title="No open loans"
+            title="No open pledges"
             description={
               query || statusFilter !== "all"
                 ? "Try a different search or filter."
-                : "No active or overdue loans right now."
+                : "No active or partially paid pledges right now."
             }
           />
         }

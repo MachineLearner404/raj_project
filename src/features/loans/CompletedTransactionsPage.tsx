@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { DataTable, type DataTableColumn } from "@/components/shared/DataTable";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { DisabledAction } from "@/components/shared/DisabledAction";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -12,59 +13,60 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { demoLoans } from "@/data/demo-data";
-import type { JewelleryLoan, LoanStatus } from "@/types/domain";
+import { listCompletedTransactions, type TransactionWithRelations } from "@/lib/repositories/transactions.repository";
 
-const columns: DataTableColumn<JewelleryLoan>[] = [
-  { key: "loanNumber", header: "Loan #", render: (l) => l.loanNumber },
-  { key: "customerName", header: "Customer", render: (l) => l.customerName },
+const money = (v: string | number) => `₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+
+const columns: DataTableColumn<TransactionWithRelations>[] = [
+  { key: "pledge_code", header: "Pledge #", render: (t) => t.pledge_code },
+  { key: "customer", header: "Customer", render: (t) => `${t.customers?.full_name} · ${t.customers?.mobile}` },
+  { key: "principal_amount", header: "Principal", render: (t) => money(t.principal_amount) },
+  { key: "closed_at", header: "Closed on", render: (t) => (t.closed_at ? new Date(t.closed_at).toLocaleDateString("en-IN") : "—") },
   {
-    key: "principalAmount",
-    header: "Principal",
-    render: (l) => `₹${l.principalAmount.toLocaleString("en-IN")}`,
-  },
-  {
-    key: "interestAccrued",
-    header: "Total interest paid",
-    render: (l) => `₹${l.interestAccrued.toLocaleString("en-IN")}`,
-  },
-  { key: "dueDate", header: "Closed by", render: (l) => l.dueDate },
-  {
-    key: "status",
+    key: "closure_type",
     header: "Closure type",
-    render: (l) => <StatusBadge status={l.status} />,
+    render: (t) =>
+      t.closure_type === "CANCELLED" ? (
+        <Badge variant="outline" className="border-transparent bg-destructive/10 text-destructive">Cancelled</Badge>
+      ) : (
+        <Badge variant="outline" className="border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">Redeemed</Badge>
+      ),
   },
 ];
 
-type ClosureFilter = "all" | LoanStatus;
+type ClosureFilter = "all" | "REDEEMED" | "CANCELLED";
 
 export function CompletedTransactionsPage() {
   const [query, setQuery] = useState("");
   const [closureFilter, setClosureFilter] = useState<ClosureFilter>("all");
+  const [rows, setRows] = useState<TransactionWithRelations[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const closedLoans = useMemo(
-    () =>
-      demoLoans.filter((l) => l.status === "completed" || l.status === "auctioned"),
-    [],
-  );
+  useEffect(() => {
+    void listCompletedTransactions()
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return closedLoans.filter((loan) => {
-      const matchesStatus = closureFilter === "all" || loan.status === closureFilter;
+    return rows.filter((t) => {
+      const matchesStatus = closureFilter === "all" || t.status === closureFilter;
       const matchesQuery =
         !q ||
-        loan.loanNumber.toLowerCase().includes(q) ||
-        loan.customerName.toLowerCase().includes(q);
+        t.pledge_code.toLowerCase().includes(q) ||
+        t.customers?.full_name?.toLowerCase().includes(q) ||
+        t.customers?.mobile?.includes(q);
       return matchesStatus && matchesQuery;
     });
-  }, [closedLoans, query, closureFilter]);
+  }, [rows, query, closureFilter]);
 
   return (
     <div>
       <PageHeader
         title="Completed Transactions"
-        description="Historical record of closed loans."
+        description="Historical record of closed pledges."
       />
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -72,7 +74,7 @@ export function CompletedTransactionsPage() {
           <SearchBar
             value={query}
             onChange={setQuery}
-            placeholder="Search by loan # or customer…"
+            placeholder="Search by pledge #, customer, or mobile…"
           />
         </div>
         <Select
@@ -84,8 +86,8 @@ export function CompletedTransactionsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All closures</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="auctioned">Auctioned</SelectItem>
+            <SelectItem value="REDEEMED">Redeemed</SelectItem>
+            <SelectItem value="CANCELLED">Cancelled</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -93,17 +95,16 @@ export function CompletedTransactionsPage() {
       <DataTable
         columns={columns}
         rows={filtered}
-        getRowId={(l) => l.id}
-        actions={() => (
-          <DisabledAction
-            label="View"
-            reason="Full ledger/transaction history view ships in Phase 2"
-            size="sm"
-          />
+        isLoading={loading}
+        getRowId={(t) => t.id}
+        actions={(t) => (
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/transactions/${t.id}`}>View</Link>
+          </Button>
         )}
         emptyState={
           <EmptyState
-            title="No closed loans"
+            title="No closed pledges"
             description="Nothing matches this search or filter yet."
           />
         }

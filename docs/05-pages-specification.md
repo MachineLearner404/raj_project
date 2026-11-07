@@ -99,6 +99,30 @@ Phase 1/2** until then, not silently missing).
 [02-database-schema-erd.md](./02-database-schema-erd.md) — loan creation moves money
 out).
 
+**Historical records:** the form opens with **"Is this a Previous / Historical
+Record?"** — *No — New transaction* (default, deposit date pinned to today) or
+*Yes — Previous transaction*. Choosing Yes unlocks a past deposit date and a
+repeating **Previous payments** group (date, amount, mode, remarks); the interest
+and principal split of each is calculated, never entered. Entering a past deposit
+date without choosing Yes is rejected, so a historical pledge is always recorded
+deliberately. A **Current settlement calculation** panel then previews original
+loan amount, previous principal repayments, remaining principal, total interest
+accrued, previous interest paid, outstanding interest, total previous payments and
+amount payable today, stamped with the calculation date. Submitting calls
+`create_historical_jewellery_loan()`, which replays the payments server-side on
+their real dates — the panel is a preview, not the authority (see
+[11-financial-calculation-policy.md](./11-financial-calculation-policy.md)).
+
+**Jewellery photo:** each item in the repeating group has an optional photo
+(JPG/PNG/WebP, 5 MB max) with an inline preview. Items don't have a row until the
+pledge is created, so the photo is uploaded as a second step right after
+creation: it lands in the private `jewellery-photos` bucket at
+`<shop_id>/<transaction_id>/<item_id>.<ext>` and is attached with the narrow
+`set_jewellery_item_photo()` RPC, gated on the same `create_loans` capability as
+loan creation itself — never a direct table update. A failed photo upload warns
+but does not block the pledge, which has already been saved. The photo is shown
+as a thumbnail per item on the Transaction Detail page.
+
 ---
 
 ## 4. Receive Payment (`/payments/new`)
@@ -132,6 +156,15 @@ since closure is a one-way action.
 **Access:** staff, manager, owner can record payments (see role matrix); full
 closure confirmation dialog is shown to all roles, but the system still logs
 `received_by` for accountability.
+
+**Amount due today:** selecting a pledge calls `calculate_live_settlement()` for
+it, so the **Amount due today** panel is the server's figure as of the current
+date — remaining principal plus outstanding interest, with interest accrued to
+date, interest already paid, total received and the calculation date, and a
+*Pay full settlement* shortcut. This matters for historical pledges, whose stored
+`accrued_interest` only covers periods already posted. The panel refreshes after
+every posting; a partial payment leaves the pledge `ACTIVE`/`PARTIALLY_PAID` and
+only a full clearance redeems it.
 
 ---
 
@@ -182,6 +215,27 @@ EmptyState if no active loans; LoadingState in Phase 2+.
 
 **Access:** all roles can view; financial columns may be role-gated — same open
 question flagged on the Dashboard page.
+
+---
+
+## 6a. Transaction Detail (`/loans/:id`)
+
+**Purpose:** the full record of one pledge — frozen terms, jewellery, and every
+ledger behind its balance.
+
+**Data shown:** header (pledge code, customer, a *Historical record* badge when
+`is_historical`), frozen terms and deposit date, status and original principal,
+jewellery items, then the payment-allocation, interest-event and audit ledgers.
+
+**Live Settlement Value:** a panel showing original principal, current remaining
+principal, total interest accrued, interest already paid, outstanding interest,
+total payments received, the current settlement amount and the calculation date.
+It calls `calculate_live_settlement()` on open and on *Recalculate*, so the figure
+is always current for today and is never read from a stored total — see
+[11-financial-calculation-policy.md](./11-financial-calculation-policy.md). A
+redeemed pledge shows nothing payable.
+
+**Access:** all roles can view; the per-payment *Reverse* link is owner-only.
 
 ---
 

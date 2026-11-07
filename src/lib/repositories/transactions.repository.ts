@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase/client";
-import type { Database, PaymentMethod, PaymentType } from "@/lib/supabase/database.types";
+import type { Database, LiveSettlementJson, PaymentMethod, PaymentType } from "@/lib/supabase/database.types";
 
 type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
 
@@ -90,6 +90,19 @@ export interface CreateJewelleryLoanInput {
   items: Array<{ jewelleryName: string; metalType: string; weightGrams: number; quantity: number; notes?: string | null }>;
 }
 
+export interface HistoricalPaymentInput {
+  paymentDate: string;
+  amount: number;
+  paymentMethod: "CASH" | "UPI" | "BANK_TRANSFER" | "OTHER";
+  remarks?: string;
+  referenceNumber?: string;
+  idempotencyKey: string;
+}
+
+export interface CreateHistoricalJewelleryLoanInput extends CreateJewelleryLoanInput {
+  previousPayments: HistoricalPaymentInput[];
+}
+
 export async function createJewelleryLoan(input: CreateJewelleryLoanInput): Promise<TransactionRow> {
   const { data, error } = await supabase.rpc("create_jewellery_loan", {
     p_customer_id: input.customerId, p_principal_amount: input.principalAmount,
@@ -100,6 +113,57 @@ export async function createJewelleryLoan(input: CreateJewelleryLoanInput): Prom
   });
   if (error) throw error;
   return data;
+}
+
+/** Creates the pledge and replays all supplied dated payments in one DB transaction. */
+export async function createHistoricalJewelleryLoan(input: CreateHistoricalJewelleryLoanInput): Promise<TransactionRow> {
+  const { data, error } = await supabase.rpc("create_historical_jewellery_loan", {
+    p_customer_id: input.customerId, p_principal_amount: input.principalAmount,
+    p_interest_type: input.interestType, p_interest_rate: input.interestRate,
+    p_flat_interest_basis: input.flatInterestBasis ?? null, p_deposit_date: input.depositDate,
+    p_notes: input.notes ?? null, p_idempotency_key: input.idempotencyKey,
+    p_items: input.items.map(item => ({ jewellery_name: item.jewelleryName, metal_type: item.metalType, weight_grams: item.weightGrams, quantity: item.quantity, notes: item.notes ?? null })),
+    p_previous_payments: input.previousPayments.map(payment => ({ payment_date: payment.paymentDate, amount: payment.amount, payment_method: payment.paymentMethod, remarks: payment.remarks ?? null, reference_number: payment.referenceNumber ?? null, idempotency_key: payment.idempotencyKey })),
+  });
+  if (error) throw error;
+  return data as TransactionRow;
+}
+
+type JewelleryItemRow = Database["public"]["Tables"]["jewellery_items"]["Row"];
+
+/** Items as inserted inside create_jewellery_loan()'s single loop over the
+ * submitted array, so creation order lines up with the form's item order. */
+export async function listJewelleryItems(transactionId: string): Promise<JewelleryItemRow[]> {
+  const { data, error } = await supabase.from("jewellery_items").select("*").eq("transaction_id", transactionId).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+/** Uploads under the item's own transaction folder, then attaches the path
+ * through the narrow set_jewellery_item_photo RPC — never a direct table update. */
+export async function uploadJewelleryItemPhoto(item: JewelleryItemRow, file: File): Promise<JewelleryItemRow> {
+  const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+  const path = `${item.shop_id}/${item.transaction_id}/${item.id}.${extension}`;
+  const { error: uploadError } = await supabase.storage.from("jewellery-photos").upload(path, file, { contentType: file.type, upsert: true });
+  if (uploadError) throw uploadError;
+  const { data, error } = await supabase.rpc("set_jewellery_item_photo", { p_item_id: item.id, p_photo_path: path });
+  if (error) throw error;
+  return data;
+}
+
+export async function getJewelleryItemPhotoUrl(path: string) {
+  const { data, error } = await supabase.storage.from("jewellery-photos").createSignedUrl(path, 60 * 10);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export type LiveSettlement = LiveSettlementJson;
+
+/** The server does not persist this read-model value; it is recalculated for every open/refresh. */
+export async function getLiveSettlement(transactionId: string, asOf?: string): Promise<LiveSettlement> {
+  const { data, error } = await supabase.rpc("calculate_live_settlement", { p_transaction_id: transactionId, ...(asOf ? { p_as_of: asOf } : {}) });
+  if (error) throw error;
+  return data as LiveSettlement;
 }
 
 export interface RecordPaymentInput {

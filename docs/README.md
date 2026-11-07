@@ -14,6 +14,8 @@ this order; later documents reference earlier ones.
 9. [08-security-threat-checklist.md](./08-security-threat-checklist.md) — Security checklist for personal data and financial records.
 10. [09-error-handling-validation-backup.md](./09-error-handling-validation-backup.md) — Validation layering, error handling, concurrency correctness, backup strategy.
 11. [10-phase-plan.md](./10-phase-plan.md) — Phase-by-phase scope, risks, acceptance criteria (Phase 0 through Phase 4).
+12. [11-financial-calculation-policy.md](./11-financial-calculation-policy.md) — The as-built money rules: rounding, completed periods, payment allocation, frozen terms, **historical pledge entry and the live settlement read model**.
+13. [12-security-release-review.md](./12-security-release-review.md) — Security review carried out before release.
 
 ## Open questions requiring your decision before later phases proceed
 
